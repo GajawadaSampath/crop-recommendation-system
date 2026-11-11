@@ -1,0 +1,97 @@
+"""Streamlit interface for the trained crop recommendation pipeline."""
+import json
+from pathlib import Path
+
+import streamlit as st
+
+from src.prediction import MODEL_PATH, predict_crop
+from src.preprocessing import DEFAULT_DATASET, FEATURES
+
+ROOT = Path(__file__).resolve().parent
+RESULTS_PATH = ROOT / "reports" / "model_results.json"
+st.set_page_config(page_title="CropWise | Crop Recommendation", page_icon="🌱", layout="wide")
+st.markdown("""<style>
+.stApp {background: linear-gradient(135deg,#f5faf4,#ffffff 52%,#eff7ee); color:#193b27}
+[data-testid="stSidebar"] {background:#e8f3e7}
+.hero {padding:2rem 2.2rem;border-radius:20px;background:linear-gradient(120deg,#164d2b,#38844b);color:white;margin-bottom:1rem}
+.hero h1 {color:white;font-size:2.55rem}.hero p {font-size:1.1rem}
+.metric-card {padding:1rem;border:1px solid #d8e8d8;border-radius:14px;background:white}
+</style>""", unsafe_allow_html=True)
+st.sidebar.title("🌱 CropWise")
+page = st.sidebar.radio("Navigate", ["Home", "Crop Prediction", "Model Performance", "About"])
+
+def get_results():
+    if RESULTS_PATH.exists():
+        try:
+            return json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+if page == "Home":
+    st.markdown("<div class='hero'><h1>Crop Recommendation System</h1><p>Data-informed crop selection from soil nutrients and local climate measurements.</p></div>", unsafe_allow_html=True)
+    a, b = st.columns([1.35, 1])
+    with a:
+        st.subheader("Project objective")
+        st.write("Use seven measurable soil and environmental features with a supervised K-Nearest Neighbors classifier to recommend one crop label represented in the training dataset.")
+        st.subheader("How it works")
+        st.write("The saved scikit-learn pipeline scales the measurements using training-set statistics, then compares the input with nearby training examples using Euclidean distance.")
+    with b:
+        st.info("Enter N, P, K, temperature, humidity, soil pH, and rainfall on the Crop Prediction page.")
+        if not MODEL_PATH.exists():
+            st.warning("Model is not trained yet. Place the real CSV at `dataset/Crop_recommendation.csv`, then run `python -m src.train_model` and `python -m src.evaluate_model`.")
+elif page == "Crop Prediction":
+    st.title("🌾 Crop Prediction")
+    st.write("Enter values in the units used by the dataset. A prediction is available after training the model with the real CSV.")
+    if not MODEL_PATH.exists():
+        st.warning("The trained model is not available yet. Download the dataset linked in README.md and run the training command.")
+    with st.form("prediction_form"):
+        cols = st.columns(3)
+        specs = [("Nitrogen (N)",0.0,140.0,50.0),("Phosphorus (P)",0.0,145.0,50.0),
+                 ("Potassium (K)",0.0,205.0,50.0),("Temperature (°C)",-10.0,60.0,25.0),
+                 ("Humidity (%)",0.0,100.0,65.0),("Soil pH",0.0,14.0,6.5),("Rainfall (mm)",0.0,500.0,100.0)]
+        values=[]
+        for index, (label, low, high, default) in enumerate(specs):
+            with cols[index % 3]:
+                values.append(st.number_input(label, min_value=low, max_value=high, value=default, step=0.1 if index > 2 else 1.0))
+        submitted=st.form_submit_button("🌿 Recommend Crop", type="primary", use_container_width=True)
+    if submitted:
+        if not MODEL_PATH.exists():
+            st.error("No trained model found. Train the model with the real dataset first.")
+        else:
+            try:
+                crop=predict_crop(values)
+                st.success(f"Recommended crop: **{crop.title()}**")
+                st.caption("This is a model classification, not a guarantee of yield or a substitute for local agronomic advice.")
+            except (ValueError, FileNotFoundError, OSError) as error:
+                st.error(f"Could not make a prediction: {error}")
+elif page == "Model Performance":
+    st.title("📊 Model Performance")
+    results=get_results()
+    if results.get("status") != "evaluated":
+        st.info("Actual held-out evaluation results will appear after you add the real dataset and run training and evaluation.")
+        if results.get("cv_accuracy_by_k"):
+            st.write("Cross-validation accuracy by K", results["cv_accuracy_by_k"])
+    else:
+        metrics=[("Training accuracy","training_accuracy"),("Testing accuracy","testing_accuracy"),
+                 ("Weighted precision","weighted_precision"),("Weighted recall","weighted_recall"),("Weighted F1","weighted_f1_score")]
+        columns=st.columns(len(metrics))
+        for column,(label,key) in zip(columns,metrics):
+            column.metric(label,f"{results[key]:.3f}")
+        st.caption(f"Selected K: {results['selected_k']} · Held-out test size: {results['test_records']} records")
+        for filename, title in [("confusion_matrix.png","Confusion matrix"),("k_value_comparison.png","K selection"),("crop_distribution.png","Crop distribution")]:
+            path=ROOT / "reports" / "figures" / filename
+            if path.exists(): st.subheader(title); st.image(str(path), use_container_width=True)
+        with st.expander("Classification report"):
+            st.json(results["classification_report"])
+elif page == "About":
+    st.title("About this project")
+    st.subheader("Supervised learning")
+    st.write("Supervised classification learns a mapping from labeled examples to a category. Here, crop labels are the target and the seven soil/climate measurements are input features.")
+    st.subheader("K-Nearest Neighbors")
+    st.write("KNN assigns the most common label among the K nearest training examples. The project compares K = 3, 5, 7, 9, and 11 using stratified five-fold cross-validation on the training data. Euclidean distance is used after standardization.")
+    st.subheader("Dataset and features")
+    st.write("The Kaggle Crop Recommendation Dataset contains N, P, K, temperature, humidity, pH, rainfall, and label columns. Refer to README.md for the source and placement instructions.")
+    st.dataframe({"Feature":FEATURES,"Description":["Nitrogen content","Phosphorus content","Potassium content","Temperature in °C","Relative humidity in %","Soil pH","Rainfall in mm"]},hide_index=True)
+    st.subheader("Limitations")
+    st.write("This educational classifier is limited to labels and conditions found in its training data. It does not account for location-specific varieties, soil sampling uncertainty, season, irrigation, pests, or market needs. Validate with local agronomy expertise.")
