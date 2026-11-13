@@ -3,13 +3,16 @@ import base64
 import json
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
+from src.exploratory_analysis import ensure_eda_figures, load_eda_dataset
 from src.prediction import MODEL_PATH, predict_crop
-from src.preprocessing import FEATURES
+from src.preprocessing import DEFAULT_DATASET, FEATURES
 
 ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = ROOT / "reports" / "model_results.json"
+FIGURES_PATH = ROOT / "reports" / "figures"
 
 
 def background_image(path):
@@ -79,6 +82,12 @@ def get_results():
     return {}
 
 
+@st.cache_data(show_spinner="Loading the crop dataset...")
+def load_cached_eda_dataset(path, modified_ns):
+    """Cache the CSV by path and modification time so updated data is reloaded."""
+    return load_eda_dataset(path)
+
+
 def render_hero():
     st.markdown(
         """<div class="hero">
@@ -104,7 +113,11 @@ def render_footer():
 results = get_results()
 st.sidebar.markdown("<div class='brand-mark'><span class='brand-icon'>🌱</span>CROPWISE</div>", unsafe_allow_html=True)
 st.sidebar.caption("AI-powered crop recommendation")
-page = st.sidebar.radio("Explore", ["Home", "Crop Prediction", "Model Performance", "About"], label_visibility="collapsed")
+page = st.sidebar.radio(
+    "Explore",
+    ["Home", "Crop Prediction", "Model Performance", "About", "Exploratory Data Analysis (EDA)"],
+    label_visibility="collapsed",
+)
 st.sidebar.divider()
 if MODEL_PATH.exists():
     st.sidebar.success("KNN model ready")
@@ -242,5 +255,57 @@ elif page == "About":
     st.dataframe({"Feature": FEATURES, "Description": ["Nitrogen content", "Phosphorus content", "Potassium content", "Temperature in °C", "Relative humidity in %", "Soil pH", "Rainfall in mm"]}, hide_index=True, use_container_width=True)
     st.subheader("Limitations")
     st.write("Recommendations are limited to crops and conditions in the training dataset. The model does not account for every local cultivar, soil sampling uncertainty, irrigation plan, pest pressure, market conditions, or future weather. Confirm decisions with local agricultural expertise.")
+
+elif page == "Exploratory Data Analysis (EDA)":
+    st.markdown("<div class='section-label'>Explore the supplied dataset</div>", unsafe_allow_html=True)
+    st.header("Exploratory Data Analysis (EDA)")
+    try:
+        dataset_mtime_ns = DEFAULT_DATASET.stat().st_mtime_ns
+        data = load_cached_eda_dataset(str(DEFAULT_DATASET), dataset_mtime_ns)
+        figures = ensure_eda_figures(data, dataset_mtime_ns, FIGURES_PATH)
+    except (OSError, ValueError, pd.errors.ParserError) as error:
+        st.error(f"Could not load or visualize the crop dataset: {error}")
+    else:
+        st.subheader("Dataset overview")
+        st.write(
+            "The Crop Recommendation Dataset contains soil nutrient and climate "
+            "measurements paired with crop labels."
+        )
+        st.subheader("Dataset dimensions")
+        overview = st.columns(3)
+        overview[0].metric("Rows", f"{data.shape[0]:,}")
+        overview[1].metric("Columns", data.shape[1])
+        overview[2].metric("Crop categories", int(data["label"].nunique()))
+
+        st.subheader("First five rows")
+        st.dataframe(data.head(), hide_index=True, alt="First five rows of the crop recommendation dataset")
+
+        st.subheader("Missing values")
+        st.image(
+            str(figures["missing_values.png"]),
+            width="stretch",
+            alt="Missing-value counts for every dataset column",
+        )
+
+        st.subheader("Feature distributions")
+        st.image(
+            str(figures["feature_distribution.png"]),
+            width="stretch",
+            alt="Histograms showing the distributions of the seven numerical input features",
+        )
+
+        st.subheader("Feature boxplots")
+        st.image(
+            str(figures["feature_boxplot.png"]),
+            width="stretch",
+            alt="Boxplots of the seven numerical input features showing quartiles and potential outliers",
+        )
+
+        st.subheader("Feature correlation")
+        st.image(
+            str(figures["correlation_heatmap.png"]),
+            width="stretch",
+            alt="Annotated Pearson correlation heatmap for the seven numerical input features",
+        )
 
 render_footer()
