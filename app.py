@@ -1,4 +1,5 @@
 """CropWise Streamlit interface for the existing trained KNN pipeline."""
+import base64
 import json
 from pathlib import Path
 
@@ -10,26 +11,43 @@ from src.preprocessing import FEATURES
 ROOT = Path(__file__).resolve().parent
 RESULTS_PATH = ROOT / "reports" / "model_results.json"
 
+
+def background_image(path):
+    """Return an embedded local image, or a CSS fallback if it is unavailable."""
+    try:
+        image_data = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return "none"
+    return f'url("data:image/jpeg;base64,{image_data}")'
+
+
+FIELD_IMAGE = background_image(ROOT / "assets" / "crop-field.jpg")
+FARMERS_IMAGE = background_image(ROOT / "assets" / "farmers-field.jpg")
+
 st.set_page_config(page_title="CropWise · Crop Recommendation", page_icon="🌱", layout="wide")
 
 st.markdown(
     """<style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
-    :root { --forest:#123c2b; --green:#197449; --mint:#eaf5ed; --ink:#183328; --muted:#65796e; }
-    .stApp { background:linear-gradient(155deg,#f3f8f2 0%,#fff 48%,#f4f8f3 100%); color:var(--ink); }
+    :root { --forest:#123c2b; --green:#197449; --mint:#eaf5ed; --ink:#183328; --muted:#65796e; --field-image:__FIELD_IMAGE__; --farmers-image:__FARMERS_IMAGE__; }
+    .stApp { background:linear-gradient(155deg,rgba(247,249,242,.22) 0%,rgba(250,250,246,.28) 48%,rgba(242,248,240,.22) 100%),var(--farmers-image); background-size:cover; background-position:center; background-attachment:fixed; color:var(--ink); }
     html, body, [class*="css"] { font-family:'DM Sans',sans-serif; }
     h1,h2,h3 { font-family:'Manrope','DM Sans',sans-serif; color:var(--forest); letter-spacing:-.025em; }
+    [data-testid="stMainBlockContainer"] { background:rgba(250,250,246,.9); border:1px solid rgba(255,255,255,.72); border-radius:22px; padding:1.5rem 2rem 2rem; box-shadow:0 12px 34px rgba(24,51,40,.08); }
+    [data-testid="stMarkdownContainer"], [data-testid="stText"], [data-testid="stCaptionContainer"] { color:var(--ink); }
+    [data-testid="stCaptionContainer"] { color:#53665b; }
     [data-testid="stSidebar"] { background:linear-gradient(180deg,#e8f3e9,#f4f8f3); border-right:1px solid #dbe9dd; }
     [data-testid="stSidebar"] h1 { font-size:1.45rem; }
     .brand-mark { display:flex; align-items:center; gap:.7rem; font-family:'Manrope',sans-serif; font-weight:800; font-size:1.35rem; color:var(--forest); padding:.35rem 0 .8rem; }
     .brand-icon { width:2.35rem; height:2.35rem; display:grid; place-items:center; border-radius:13px; background:#d9eddd; font-size:1.3rem; }
-    .hero { position:relative; overflow:hidden; padding:2.1rem 2.35rem; border-radius:24px; background:linear-gradient(118deg,#103d2b,#16744a 67%,#32905c); color:#fff; box-shadow:0 16px 38px #174b3024; margin:.35rem 0 1.35rem; }
-    .hero:after { content:'🌿'; position:absolute; right:5%; top:3%; font-size:7rem; opacity:.12; transform:rotate(-18deg); }
-    .hero h1 { color:#fff!important; font-size:clamp(2rem,4vw,3.05rem); line-height:1.12; margin:.3rem 0 .65rem; }
-    .hero p { max-width:680px; color:#e0f1e5; font-size:1.04rem; line-height:1.65; margin:0; }
-    .eyebrow { color:#bce4c7; font-size:.76rem; font-weight:700; letter-spacing:.15em; text-transform:uppercase; }
+    .hero { position:relative; isolation:isolate; overflow:hidden; padding:2.1rem 2.35rem; border-radius:24px; background:linear-gradient(rgba(15,32,23,.26),rgba(15,32,23,.26)),var(--field-image); background-size:cover; background-position:center 58%; color:#fff; box-shadow:0 16px 38px #174b3024; margin:.35rem 0 1.35rem; }
+    .hero:after { content:'🌿'; position:absolute; z-index:1; right:5%; top:3%; font-size:7rem; opacity:.12; transform:rotate(-18deg); }
+    .hero > * { position:relative; z-index:2; }
+    .hero h1 { color:#fff!important; text-shadow:0 1px 3px rgba(0,0,0,.24); font-size:clamp(2rem,4vw,3.05rem); line-height:1.12; margin:.3rem 0 .65rem; }
+    .hero p { max-width:680px; color:#f1f5f1; text-shadow:0 1px 3px rgba(0,0,0,.3); font-size:1.04rem; line-height:1.65; margin:0; }
+    .eyebrow { color:#d5eadb; text-shadow:0 1px 3px rgba(0,0,0,.3); font-size:.76rem; font-weight:700; letter-spacing:.15em; text-transform:uppercase; }
     .hero-pills { display:flex; flex-wrap:wrap; gap:.55rem; margin-top:1.15rem; }
-    .pill { border:1px solid #ffffff48; border-radius:999px; background:#ffffff16; color:#fff; padding:.38rem .75rem; font-size:.78rem; font-weight:600; }
+    .pill { border:1px solid rgba(255,255,255,.58); border-radius:999px; background:rgba(15,32,23,.38); color:#fff; padding:.38rem .75rem; font-size:.78rem; font-weight:600; }
     .section-label { color:#568068; font-weight:700; font-size:.74rem; letter-spacing:.12em; text-transform:uppercase; margin:.35rem 0 .15rem; }
     .soft-card { border:1px solid #e1ece2; border-radius:18px; background:#fff; padding:1.1rem 1.25rem; box-shadow:0 7px 22px #18332808; }
     .result-card { padding:1.45rem 1.6rem; border:1px solid #cce5d1; border-radius:20px; background:linear-gradient(135deg,#f1faf2,#fff); box-shadow:0 10px 30px #1b653010; }
@@ -39,11 +57,14 @@ st.markdown(
     .stFormSubmitButton > button[kind="primary"], .stButton > button[kind="primary"] { background:linear-gradient(110deg,#17683f,#278650); color:white; box-shadow:0 7px 17px #17683f30; }
     .stFormSubmitButton > button[kind="primary"]:hover, .stButton > button[kind="primary"]:hover { background:#105332; transform:translateY(-1px); }
     [data-testid="stMetric"] { background:#fff; border:1px solid #e2ece3; border-radius:15px; padding:.8rem 1rem; box-shadow:0 5px 18px #18332808; }
-    [data-testid="stMetricLabel"] { color:#63796d; }
-    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div { border-radius:10px; }
-    .footer { margin-top:2.5rem; padding:1rem .2rem .25rem; border-top:1px solid #deeadf; color:#708277; font-size:.78rem; display:flex; flex-wrap:wrap; justify-content:space-between; gap:.5rem; }
-    @media (max-width:700px) { .hero {padding:1.5rem;border-radius:18px}.hero:after{right:-2%;top:22%;font-size:5rem}.result-crop{font-size:1.7rem} }
-    </style>""",
+    [data-testid="stMetricLabel"] { color:#465d4e; }
+    [data-testid="stMetricValue"] { color:#183328; }
+    div[data-baseweb="input"] > div, div[data-baseweb="select"] > div { border-radius:10px; background:#fff; border-color:#bdcfc1; }
+    div[data-baseweb="input"] input, div[data-baseweb="select"] input { color:#183328; }
+    [data-testid="stImage"] { background:#fff; border:1px solid #e1ece2; border-radius:14px; padding:.6rem; box-shadow:0 5px 18px #18332808; }
+    .footer { margin-top:2.5rem; padding:1rem .2rem .25rem; border-top:1px solid #deeadf; color:#53665b; font-size:.78rem; display:flex; flex-wrap:wrap; justify-content:space-between; gap:.5rem; }
+    @media (max-width:700px) { [data-testid="stMainBlockContainer"] { padding:1rem; border-radius:16px; }.hero {padding:1.5rem;border-radius:18px}.hero:after{right:-2%;top:22%;font-size:5rem}.result-crop{font-size:1.7rem} }
+    </style>""".replace("__FIELD_IMAGE__", FIELD_IMAGE).replace("__FARMERS_IMAGE__", FARMERS_IMAGE),
     unsafe_allow_html=True,
 )
 
@@ -66,7 +87,7 @@ def render_hero():
           <p>Find a data-informed crop match from your soil nutrients and growing conditions.
           Simple inputs, a trained KNN model, and a clearer place to start.</p>
           <div class="hero-pills"><span class="pill">🌿 Crop Recommendation System</span>
-          <span class="pill">◉ KNN Machine Learning</span><span class="pill">CSE_16 · Academic Project</span></div>
+          <span class="pill">◉ KNN Machine Learning</span></div>
         </div>""",
         unsafe_allow_html=True,
     )
